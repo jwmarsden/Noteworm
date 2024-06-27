@@ -6,12 +6,12 @@ use clap::{Parser, Subcommand};
 pub struct Opts {
     // The action for Bookworm to execute. 
     #[command(subcommand)]
-    command: Option<Commands>,
+    pub command: Option<Command>,
 }
 
 #[derive(Clone, Debug, Subcommand)]
 #[command(arg_required_else_help = true)]
-enum Commands {
+pub enum Command {
     /// Backup Repository
     Backup {
         /// Source Path (File Path)
@@ -35,6 +35,10 @@ enum Commands {
 impl Opts {
     pub fn parse_args() -> Self {
         Self::parse()
+    }
+
+    pub fn get_command(&self) -> Option<Command> {
+        return self.command.clone();
     }
 
 }

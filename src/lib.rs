@@ -6,7 +6,20 @@ pub mod errors;
 pub mod opts;
 
 pub fn bookworm(opts: &Opts) -> Result<(), BookwormError> {
-    trace!("Enter Bookworm. Dun dun dun. {:?}", opts);
+    println!("Enter Bookworm. Dun dun dun. {:?}", opts.command);
+
+    match opts.command.clone() {
+        Some(c)   => {
+            match c {
+                opts::Command::Backup { source, destination, .. } => println!("Backup from {:?} to {:?}", source, destination),
+                opts::Command::Clean { } => todo!(),
+                opts::Command::Report { } => todo!(),
+            }
+        },
+        None    => println!("Blah"),
+    }
+    
+
     Ok(())
 }
 
