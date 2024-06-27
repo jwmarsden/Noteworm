@@ -1,12 +1,12 @@
-use errors::BookwormError;
+use errors::NotewormError;
 use log::trace;
 use opts::Opts;
 
 pub mod errors;
 pub mod opts;
 
-pub fn bookworm(opts: &Opts) -> Result<(), BookwormError> {
-    println!("Enter Bookworm. Dun dun dun. {:?}", opts.command);
+pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
+    println!("Enter Noteworm. Dun dun dun. {:?}", opts.command);
 
     match &opts.command {
         Some(c)   => {
