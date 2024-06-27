@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Clone, Debug, Parser)]
-#[command(name = "Bookworm")]
-#[command(about = "Its a very hungry worm.", long_about = None)]
+#[command(name = "Noteworm")]
+#[command(about = "Its a Very Hungry Noteworm.", long_about = None)]
 pub struct Opts {
     // The action for Bookworm to execute. 
     #[command(subcommand)]
