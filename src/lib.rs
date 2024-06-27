@@ -8,7 +8,7 @@ pub mod opts;
 pub fn bookworm(opts: &Opts) -> Result<(), BookwormError> {
     println!("Enter Bookworm. Dun dun dun. {:?}", opts.command);
 
-    match opts.command.clone() {
+    match &opts.command {
         Some(c)   => {
             match c {
                 opts::Command::Backup { source, destination, .. } => println!("Backup from {:?} to {:?}", source, destination),
