@@ -22,6 +22,7 @@ pub enum FileType {
 #[derive(Clone, Debug)]
 pub struct NoteFileMeta {
     file_path: PathBuf,
+    file_relative_path: PathBuf,
     file_size: u64,
     file_created: DateTime<Local>,
     file_modified: DateTime<Local>,
@@ -76,6 +77,7 @@ fn recurse_files(base_path: &PathBuf, path: &PathBuf) -> Result<Vec<NoteFileMeta
     let entries = read_dir(path)?;
     for entry in entries {
         let entry = entry?;
+        let entry_path = entry.path();
         let meta = entry.metadata()?;
         
         if meta.is_dir() {
@@ -83,11 +85,12 @@ fn recurse_files(base_path: &PathBuf, path: &PathBuf) -> Result<Vec<NoteFileMeta
             buf.append(&mut subdir);
         }
 
-        let file_relative_path = path.strip_prefix(base_path).unwrap();
+        let file_relative_path = entry_path.strip_prefix(base_path).unwrap();
 
         if meta.is_file() {
             buf.push(NoteFileMeta {
-                file_path: file_relative_path.to_path_buf(),
+                file_path: entry_path.to_path_buf(),
+                file_relative_path: file_relative_path.to_path_buf(),
                 file_size: meta.len(),
                 file_created: meta.created()?.clone().into(),
                 file_modified: meta.modified()?.clone().into(),
