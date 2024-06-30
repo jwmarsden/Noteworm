@@ -1,35 +1,71 @@
 use errors::NotewormError;
-use std::{fs::read_dir, path::{Path, PathBuf}};
+use std::fs::File;
+use std::io::{BufReader, Read};
+use std::os::unix::fs::MetadataExt;
+use std::{fs::read_dir, path::PathBuf};
+use std::fmt;
 use log::info;
 use opts::Opts;
-use chrono::{NaiveDate, NaiveDateTime, DateTime, Local};
-
+use chrono::{NaiveDateTime, DateTime, Local};
+use std::ffi::OsStr;
 
 pub mod errors;
 pub mod opts;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileType {
+    Directory,
     Markdown,
-    Image,
+    Jpeg,
+    Png,
+    Svg,
     Canvas,
     Excalidraw,
     Json,
     Pdf,
+    Document,
+    Javascript,
+    Stylesheet,
+    Presentation,
+    Git,
     Unknown,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq)]
 pub struct NoteFileMeta {
     file_path: PathBuf,
     file_relative_path: PathBuf,
     file_size: u64,
+    file_type: FileType,
     file_created: DateTime<Local>,
     file_modified: DateTime<Local>,
+    file_extension: Option<String>,
 	note_summary: Option<String>,
-	note_type: Option<FileType>,
     note_created: Option<NaiveDateTime>,
     note_updated: Option<NaiveDateTime>,
+}
+
+impl NoteFileMeta { 
+    pub fn new(file_path: PathBuf, file_relative_path: PathBuf, file_size: u64,
+        file_created: DateTime<Local>, file_modified: DateTime<Local>) -> Self {
+        let file_extension = get_extension_from_path(&file_relative_path);
+        let file_type = get_file_type_from_path(&file_relative_path);
+        Self { 
+            file_path, file_relative_path, file_size,
+            file_created, file_modified,
+            file_type, file_extension, note_summary: None, 
+            note_created: None, note_updated: None,
+        }
+    }  
+    pub fn file_size(&self) -> u64 {
+        self.file_size
+    }
+} 
+
+impl fmt::Debug for NoteFileMeta {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NoteFileMeta: {:?} {:?}", self.file_type, self.file_relative_path)
+    }
 }
 
 pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
@@ -64,16 +100,28 @@ pub fn backup(source: &String, destination: &String, dry_run: bool) -> Result<()
     println!("{:?}", source_metadata.is_dir());
 
     let source_files = recurse_files(&source_path, &source_path)?;
-    for file in source_files {
-        println!("File: {:?}", file);
-    }
+    for ref file in source_files {
+        let mut destination_file_path = PathBuf::from(destination);
+        destination_file_path.push(&file.file_relative_path);
 
+        if file_delta_difference_check(&file.file_path, &destination_file_path).unwrap() {
+            let destination_prefix = destination_file_path.parent();
+            let _ = match destination_prefix {
+                Some(prefix) => std::fs::create_dir_all(prefix),
+                None => todo!(), 
+            };
+            println!("{:?} -> {:?}", &file.file_path, destination_file_path);
+            std::fs::copy(&file.file_path, &destination_file_path)?;
+        }
+
+    }
     
     Ok(())
 }
 
 fn recurse_files(base_path: &PathBuf, path: &PathBuf) -> Result<Vec<NoteFileMeta>, NotewormError> {
     let mut buf = vec![];
+
     let entries = read_dir(path)?;
     for entry in entries {
         let entry = entry?;
@@ -85,23 +133,114 @@ fn recurse_files(base_path: &PathBuf, path: &PathBuf) -> Result<Vec<NoteFileMeta
             buf.append(&mut subdir);
         }
 
-        let file_relative_path = entry_path.strip_prefix(base_path).unwrap();
-
-        if meta.is_file() {
-            buf.push(NoteFileMeta {
-                file_path: entry_path.to_path_buf(),
-                file_relative_path: file_relative_path.to_path_buf(),
-                file_size: meta.len(),
-                file_created: meta.created()?.clone().into(),
-                file_modified: meta.modified()?.clone().into(),
-                note_summary: None,
-                note_type: None,
-                note_created: None,
-                note_updated: None,
-            });
+        if meta.is_file() {        
+            let file_relative_path = entry_path.strip_prefix(base_path).unwrap();
+    
+            let note_file_meta = NoteFileMeta::new(
+                entry_path.to_path_buf(),
+                file_relative_path.to_path_buf(),
+                meta.len(),
+                meta.created()?.clone().into(),
+                meta.modified()?.clone().into(),
+            );
+            buf.push(note_file_meta);
         }
     }
     Ok(buf)
+}
+
+fn file_delta_difference_check(source: &PathBuf, destination: &PathBuf) -> Result<bool, NotewormError> {
+    if source.metadata()?.size() != destination.metadata()?.size() {
+        return Ok(true);
+    }
+    if let Result::Ok(file1) = File::open(source) {
+        let mut reader1 = BufReader::new(file1);
+        if let Result::Ok(file2) = File::open(destination) {
+            let mut reader2 = BufReader::new(file2);
+            let mut buf1 = [0; 10000];
+            let mut buf2 = [0; 10000];
+            loop {
+                if let Result::Ok(n1) = reader1.read(&mut buf1) {
+                    if n1 > 0 {
+                        if let Result::Ok(n2) = reader2.read(&mut buf2) {
+                            if n1 == n2 {
+                                if buf1 == buf2 {
+                                    continue;
+                                }
+                            }
+                            return Ok(true);
+                        }
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            return Ok(false);
+        };
+    }
+    Ok(false)
+}
+
+fn get_extension_from_path(path: &PathBuf) -> Option<String> {
+    let extension: &str = path.extension().and_then(OsStr::to_str)?;
+    Some(extension.to_string().to_lowercase())
+}
+
+fn get_file_type_from_path(path: &PathBuf) -> FileType {
+    let mut file_type = get_file_type_from_file_path(path);
+    if file_type != FileType::Unknown {
+        return file_type;
+    }
+    let extension_option = get_extension_from_path(path);
+    file_type = match &extension_option {
+        Some(extension) =>  get_file_type_from_extension(extension),
+        None => FileType::Unknown,
+    };
+    if file_type != FileType::Unknown {
+        return file_type;
+    }
+    file_type = get_file_type_from_file_inspection(path);
+    if file_type != FileType::Unknown {
+        return file_type;
+    }
+    return FileType::Unknown;
+}
+
+fn get_file_type_from_file_path(path: &PathBuf) -> FileType {
+    let file_name = path.file_name().and_then(OsStr::to_str);
+    return match file_name {
+        Some(file_str) => {
+            match file_str {
+                ".gitignore" => FileType::Git,
+                _ => FileType::Unknown,
+            }
+        },
+        None => FileType::Unknown,
+    }
+}
+
+fn get_file_type_from_extension(extension: &String) -> FileType {
+    return match extension.as_str() {
+        "md" | "markdown" => FileType::Markdown,
+        "jpg" | "jpeg" => FileType::Jpeg,
+        "png" => FileType::Png,
+        "svg" => FileType::Svg,
+        "pdf" => FileType::Pdf,
+        "json" => FileType::Json,
+        "js" => FileType::Javascript,
+        "canvas" => FileType::Canvas,
+        "pptx" | "odp" => FileType::Presentation,
+        "docx" => FileType::Document,
+        "css" => FileType::Stylesheet,
+        "gitignore" => FileType::Git,
+        _ => FileType::Unknown 
+    }
+}
+
+fn get_file_type_from_file_inspection(_path: &PathBuf) -> FileType {
+    return FileType::Unknown;
 }
 
 pub fn add(left: usize, right: usize) -> usize {
