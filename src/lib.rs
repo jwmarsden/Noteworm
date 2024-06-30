@@ -104,7 +104,8 @@ pub fn backup(source: &String, destination: &String, dry_run: bool) -> Result<()
         let mut destination_file_path = PathBuf::from(destination);
         destination_file_path.push(&file.file_relative_path);
 
-        if file_delta_difference_check(&file.file_path, &destination_file_path).unwrap() {
+        println!("{:?} -> {:?}", file.file_path, destination_file_path);
+        if !destination_file_path.exists() || file_delta_difference_check(&file.file_path, &destination_file_path).unwrap() {
             let destination_prefix = destination_file_path.parent();
             let _ = match destination_prefix {
                 Some(prefix) => std::fs::create_dir_all(prefix),
