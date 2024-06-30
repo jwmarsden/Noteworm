@@ -153,16 +153,16 @@ fn file_delta_difference_check(source: &PathBuf, destination: &PathBuf) -> Resul
     if source.metadata()?.size() != destination.metadata()?.size() {
         return Ok(true);
     }
-    if let Result::Ok(file1) = File::open(source) {
-        let mut reader1 = BufReader::new(file1);
-        if let Result::Ok(file2) = File::open(destination) {
-            let mut reader2 = BufReader::new(file2);
+    if let Result::Ok(source_file) = File::open(source) {
+        let mut source_reader = BufReader::new(source_file);
+        if let Result::Ok(destination_file) = File::open(destination) {
+            let mut destination_reader = BufReader::new(destination_file);
             let mut buf1 = [0; 10000];
             let mut buf2 = [0; 10000];
             loop {
-                if let Result::Ok(n1) = reader1.read(&mut buf1) {
+                if let Result::Ok(n1) = source_reader.read(&mut buf1) {
                     if n1 > 0 {
-                        if let Result::Ok(n2) = reader2.read(&mut buf2) {
+                        if let Result::Ok(n2) = destination_reader.read(&mut buf2) {
                             if n1 == n2 {
                                 if buf1 == buf2 {
                                     continue;
