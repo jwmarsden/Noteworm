@@ -68,6 +68,11 @@ impl fmt::Debug for NoteFileMeta {
     }
 }
 
+#[derive(Clone, PartialEq)]
+pub struct NoteFile {
+    note_file_meta: NoteFileMeta,
+}
+
 pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
     println!("Enter Noteworm. Dun dun dun. {:?}", opts.command);
 
@@ -81,7 +86,13 @@ pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
                 } => {
                     return backup(source, destination, true);
                 },
-                opts::Command::Clean { } => todo!(),
+                opts::Command::Clean { 
+                    source, 
+                    test_run, 
+                    ..
+                } => {
+                    return clean(source, test_run);
+                },
                 _ => todo!(),
             }
         },
@@ -92,19 +103,31 @@ pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
     Ok(())
 }
 
-pub fn backup(source: &String, destination: &String, dry_run: bool) -> Result<(), NotewormError> {
-    info!("Backup from {:?} to {:?} (dry run: {:?}", source, destination, dry_run);
+pub fn clean(source: &String, test_run: &bool) -> Result<(), NotewormError> {
+    info!("Clean {:?}  (dry run: {:?})", source, test_run);
+
+    let source_path: PathBuf = PathBuf::from(source);
+    let source_metadata = source_path.metadata()?;
+    let source_files = recurse_files(&source_path, &source_path)?;
+    for ref fileMeta in source_files {
+        println!("Read {:?}", fileMeta);
+
+    }
+
+    Ok(())
+}
+
+pub fn backup(source: &String, destination: &String, test_run: bool) -> Result<(), NotewormError> {
+    info!("Backup {:?} to {:?} (dry run: {:?}", source, destination, test_run);
     //let source_path = Path::new(source);
     let source_path: PathBuf = PathBuf::from(source);
     let source_metadata = source_path.metadata()?;
-    println!("{:?}", source_metadata.is_dir());
-
     let source_files = recurse_files(&source_path, &source_path)?;
     for ref file in source_files {
         let mut destination_file_path = PathBuf::from(destination);
         destination_file_path.push(&file.file_relative_path);
 
-        println!("{:?} -> {:?}", file.file_path, destination_file_path);
+        //println!("{:?} -> {:?}", file.file_path, destination_file_path);
         if !destination_file_path.exists() || file_delta_difference_check(&file.file_path, &destination_file_path).unwrap() {
             let destination_prefix = destination_file_path.parent();
             let _ = match destination_prefix {

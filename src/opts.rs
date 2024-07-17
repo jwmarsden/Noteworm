@@ -21,10 +21,18 @@ pub enum Command {
         /// Destination Path (File Path)
         #[arg(short='d', long="destination", required=true)]
         destination: String,
+
+        #[arg(short='t', long="test", required=false)]
+        test_run: bool,
     },
     /// Clean Repository
     Clean {
+        /// Source Path (File Path)
+        #[arg(short='s', long="source", default_value_t = String::from("."))]
+        source: String,
 
+        #[arg(short='t', long="test", required=false)]
+        test_run: bool,
     },
     /// Generate Reports for Repository
     Report {
