@@ -1,9 +1,14 @@
 use errors::NotewormError;
-use std::fs::File;
-use std::io::{BufReader, Read};
+
 use std::os::unix::fs::MetadataExt;
-use std::{fs::read_dir, path::PathBuf};
-use std::fmt;
+use std::{
+    collections::HashMap,
+    fmt,
+    fs::{File,read_dir},
+    io::{self, BufRead, BufReader, Read},
+    path::{Path, PathBuf},
+};
+
 use log::info;
 use opts::Opts;
 use chrono::{NaiveDateTime, DateTime, Local};
@@ -69,8 +74,10 @@ impl fmt::Debug for NoteFileMeta {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct NoteFile {
+pub struct MarkdownNoteFile {
     note_file_meta: NoteFileMeta,
+    note_len: u32,
+    note_contents: String,
 }
 
 pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
@@ -110,7 +117,21 @@ pub fn clean(source: &String, test_run: &bool) -> Result<(), NotewormError> {
     let source_metadata = source_path.metadata()?;
     let source_files = recurse_files(&source_path, &source_path)?;
     for ref fileMeta in source_files {
-        println!("Read {:?}", fileMeta);
+        
+        match &fileMeta.file_type {
+            FileType::Markdown => {
+                //let contents = std::fs::read_to_string(&fileMeta.file_path)?;
+                let lines: Vec<String> = lines_from_file(&fileMeta.file_path)?;
+                
+                println!("Markdown {:?} {:?}", fileMeta.file_relative_path, lines.len());
+            }
+            _ => {
+                println!("Read {:?}", fileMeta);
+            },
+        }
+
+
+        
 
     }
 
@@ -121,8 +142,11 @@ pub fn backup(source: &String, destination: &String, test_run: bool) -> Result<(
     info!("Backup {:?} to {:?} (dry run: {:?}", source, destination, test_run);
     //let source_path = Path::new(source);
     let source_path: PathBuf = PathBuf::from(source);
-    let source_metadata = source_path.metadata()?;
-    let source_files = recurse_files(&source_path, &source_path)?;
+    //let source_metadata = source_path.metadata()?;
+    let source_files: Vec<NoteFileMeta> = recurse_files(&source_path, &source_path)?;
+
+    let mut destination_files_map: HashMap<PathBuf, NoteFileMeta> = HashMap::new();
+
     for ref file in source_files {
         let mut destination_file_path = PathBuf::from(destination);
         destination_file_path.push(&file.file_relative_path);
@@ -138,9 +162,29 @@ pub fn backup(source: &String, destination: &String, test_run: bool) -> Result<(
             std::fs::copy(&file.file_path, &destination_file_path)?;
         }
 
+        destination_files_map.insert(file.file_relative_path.clone(), file.clone());
     }
-    
+
+    print!("Destination Size: {:?}", destination_files_map.len());    
+    let destination_path: PathBuf = PathBuf::from(destination);
+    let destination_files: Vec<NoteFileMeta> = recurse_files(&destination_path, &destination_path)?;
+
+    let git_prefix: PathBuf = PathBuf::from(".git");
+
+    for ref file in destination_files {
+        
+        let destination_git_path = file.file_relative_path.clone();
+        
+        if !destination_git_path.starts_with(&git_prefix) && !destination_files_map.contains_key(&file.file_relative_path) {
+            println!("Delete: {:?} {:?}", &file.file_path, destination_git_path);
+            std::fs::remove_file(&file.file_path)?;
+        }
+    }
     Ok(())
+}
+
+fn lines_from_file(filename: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    BufReader::new(File::open(filename)?).lines().collect()
 }
 
 fn recurse_files(base_path: &PathBuf, path: &PathBuf) -> Result<Vec<NoteFileMeta>, NotewormError> {
