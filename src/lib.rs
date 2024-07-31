@@ -129,10 +129,6 @@ pub fn clean(source: &String, test_run: &bool) -> Result<(), NotewormError> {
                 println!("Read {:?}", fileMeta);
             },
         }
-
-
-        
-
     }
 
     Ok(())
