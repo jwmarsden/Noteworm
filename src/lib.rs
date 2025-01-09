@@ -1,18 +1,19 @@
+use chrono::{NaiveDateTime, DateTime, Local};
 use errors::NotewormError;
-
-use std::os::unix::fs::MetadataExt;
+use log::info;
+use opts::Opts;
 use std::{
     collections::HashMap,
+    ffi::OsStr,
     fmt,
     fs::{File,read_dir},
     io::{self, BufRead, BufReader, Read},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
-
-use log::info;
-use opts::Opts;
-use chrono::{NaiveDateTime, DateTime, Local};
-use std::ffi::OsStr;
+use sha2::{Sha256, Digest};
+use hex;
+use fancy_regex::Regex;
 
 pub mod errors;
 pub mod opts;
@@ -45,7 +46,8 @@ pub struct NoteFileMeta {
     file_created: DateTime<Local>,
     file_modified: DateTime<Local>,
     file_extension: Option<String>,
-	note_summary: Option<String>,
+    file_hash: Option<String>,
+    note_summary: Option<String>,
     note_created: Option<NaiveDateTime>,
     note_updated: Option<NaiveDateTime>,
 }
@@ -58,13 +60,16 @@ impl NoteFileMeta {
         Self { 
             file_path, file_relative_path, file_size,
             file_created, file_modified,
-            file_type, file_extension, note_summary: None, 
+            file_type, file_extension, file_hash: None, note_summary: None, 
             note_created: None, note_updated: None,
         }
     }  
     pub fn file_size(&self) -> u64 {
         self.file_size
     }
+    //pub fn file_hash(&self) -> Option<String> {
+    //    return self.file_hash.clone();
+    //}
 } 
 
 impl fmt::Debug for NoteFileMeta {
@@ -78,6 +83,32 @@ pub struct MarkdownNoteFile {
     note_file_meta: NoteFileMeta,
     note_len: u32,
     note_contents: String,
+}
+
+pub struct FileProperty<'a> {
+    key: &'a str,
+    value: Value
+}
+
+struct Corral<T> {
+    key: String,
+    list_vec: Vec<T>,
+}
+
+impl<T> Corral<T> {
+    fn new() -> Corral <T> {
+        Self {
+            key: "blah".to_string(),
+            list_vec: Vec::new(),
+        }
+    }
+}
+
+pub enum Value {
+    StringValue(String),
+    NumberValue(u32),
+    FloatValue(f32),
+    //ListValue(Vec<T>),
 }
 
 pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
@@ -112,21 +143,57 @@ pub fn noteworm(opts: &Opts) -> Result<(), NotewormError> {
 
 pub fn clean(source: &String, test_run: &bool) -> Result<(), NotewormError> {
     info!("Clean {:?}  (dry run: {:?})", source, test_run);
-
     let source_path: PathBuf = PathBuf::from(source);
     let source_metadata = source_path.metadata()?;
     let source_files = recurse_files(&source_path, &source_path)?;
-    for ref fileMeta in source_files {
-        
-        match &fileMeta.file_type {
+
+    let simple_value_re = Regex::new(r###"^(?:(\s*\"([^\"]+)\"\s*:\s*\"([^\"]+)\"\s*)|(\s*([^\"\:]+)\s*:\s*\"([^\"]+)\"\s*)|(\s*\"([^\"]+)\"\s*:\s*(.*\S)?\s*)|(\s*([^:]+)\s*:\s*(.*\S)?\s*))$"###).unwrap();
+
+    for ref file_meta in source_files {
+        match &file_meta.file_type {
             FileType::Markdown => {
-                //let contents = std::fs::read_to_string(&fileMeta.file_path)?;
-                let lines: Vec<String> = lines_from_file(&fileMeta.file_path)?;
-                
-                println!("Markdown {:?} {:?}", fileMeta.file_relative_path, lines.len());
+                let lines: Vec<String> = lines_from_file(&file_meta.file_path)?;
+                let lines_length = lines.len();
+                let mut i = 0;
+                'line: loop {
+                    if i >= lines_length { break 'line; }
+                    let mut line = &lines[i];
+                    if i == 0 && line.starts_with("---") {
+                        println!("In Front Matter - ");
+                        'front_matter: loop {
+                            i += 1;
+                            if i == lines_length { break 'front_matter }
+                            line = &lines[i];
+                            if line.starts_with("---") {
+                                break 'front_matter
+                            }
+
+                            match simple_value_re.captures(line).unwrap() {
+                                Some(caps) => {
+                                    let mut match_vec = Vec::new();
+                                    for n in 0..caps.len() {
+                                        let value = caps.get(n);
+                                        match value {
+                                            Some(m) => match_vec.push(m.as_str()),
+                                            None => (),
+                                        }
+                                    }
+                                    println!("Match in Frontmatter: \"{}\" {:?}", line, match_vec);
+                                }
+                                None => {
+                                    // The regex did not match. Deal with it here!
+                                    println!("Non-Match in Frontmatter: {}", line);
+                                }
+                            }
+                        }
+                        println!("End Front Matter - ");
+                    }
+                    i += 1;
+                }
+                println!("Markdown {:?} {:?}", file_meta.file_relative_path, 0);
             }
             _ => {
-                println!("Read {:?}", fileMeta);
+                println!("Read {:?}  {:?}", file_meta, file_meta.file_hash.as_ref().unwrap());
             },
         }
     }
@@ -160,8 +227,7 @@ pub fn backup(source: &String, destination: &String, test_run: bool) -> Result<(
 
         destination_files_map.insert(file.file_relative_path.clone(), file.clone());
     }
-
-    print!("Destination Size: {:?}", destination_files_map.len());    
+   
     let destination_path: PathBuf = PathBuf::from(destination);
     let destination_files: Vec<NoteFileMeta> = recurse_files(&destination_path, &destination_path)?;
 
@@ -177,6 +243,26 @@ pub fn backup(source: &String, destination: &String, test_run: bool) -> Result<(
         }
     }
     Ok(())
+}
+
+fn hash_from_file(filename: impl AsRef<Path>) -> io::Result<String> {
+    let file_bytes = bytes_from_file(filename)?;
+    return hash_from_bytes(file_bytes);
+}
+
+fn hash_from_bytes(bytes: Vec<u8>) -> io::Result<String> {
+    let hash = Sha256::digest(&bytes);
+    Ok(hex::encode(hash))
+}
+
+fn bytes_from_file(filename: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    let f = File::open(filename)?;
+    let mut reader = BufReader::new(f);
+    let mut buffer = Vec::new();
+
+    // Read file into vector.
+    reader.read_to_end(&mut buffer)?;
+    return Ok(buffer);
 }
 
 fn lines_from_file(filename: impl AsRef<Path>) -> io::Result<Vec<String>> {
@@ -200,13 +286,14 @@ fn recurse_files(base_path: &PathBuf, path: &PathBuf) -> Result<Vec<NoteFileMeta
         if meta.is_file() {        
             let file_relative_path = entry_path.strip_prefix(base_path).unwrap();
     
-            let note_file_meta = NoteFileMeta::new(
+            let mut note_file_meta = NoteFileMeta::new(
                 entry_path.to_path_buf(),
                 file_relative_path.to_path_buf(),
                 meta.len(),
                 meta.created()?.clone().into(),
                 meta.modified()?.clone().into(),
             );
+            note_file_meta.file_hash = Some(hash_from_file(&entry_path)?);
             buf.push(note_file_meta);
         }
     }
